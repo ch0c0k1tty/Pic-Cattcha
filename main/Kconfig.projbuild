@@ -1,0 +1,8 @@
+menu "Pic-Cattcha"
+    config PIC_CATTCHA_SELFTEST
+        bool "Run hardware self-test at boot instead of the normal camera"
+        default n
+        help
+            Checks the OV7670 wiring, frame capture, filter, JPEG encode and flash storage,
+            prints PASS/FAIL per test on the serial monitor, then stops.
+endmenu
