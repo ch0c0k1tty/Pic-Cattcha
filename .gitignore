@@ -53,3 +53,11 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# ESP-IDF
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+
+test/test_film_filter

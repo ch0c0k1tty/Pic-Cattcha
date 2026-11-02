@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pic-Cattcha</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#2a1520;color:#ffd6e8;margin:0;padding:16px}
+button{background:#ff7ab8;color:#2a1520;border:0;border-radius:8px;padding:10px 14px;font-size:16px;margin:4px 4px 4px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:12px}
+.card{background:#3b1d2c;border-radius:8px;padding:6px;font-size:13px}
+img{width:100%;border-radius:4px;display:block}
+</style></head><body>
+<h2>Pic-Cattcha</h2>
+<button id="connect">Connect camera</button>
+<button id="fetchall" disabled>Fetch all photos</button>
+<button id="newroll" disabled>New roll</button>
+<label><input type="checkbox" id="del"> delete from camera after download</label>
+<p id="status">Not connected. Needs Chrome on Android/desktop (Web Bluetooth) over https or localhost.</p>
+<div class="grid" id="grid"></div>
+<script>
+const SVC='ca77c0de-0001-4a5e-9c1d-0123456789ab', CTL='ca77c0de-0002-4a5e-9c1d-0123456789ab',
+      DATA='ca77c0de-0003-4a5e-9c1d-0123456789ab', STAT='ca77c0de-0004-4a5e-9c1d-0123456789ab';
+let ctl, stat, pending=null;
+const $=id=>document.getElementById(id), say=t=>$('status').textContent=t;
+
+function onData(e){
+  const v=new DataView(e.target.value.buffer), t=v.getUint8(0), r=pending; if(!r) return;
+  if(t===1) for(let o=1;o+6<=v.byteLength;o+=6) r.list.push({id:v.getUint16(o,true),size:v.getUint32(o+2,true)});
+  else if(t===2){r.size=v.getUint32(3,true);r.chunks=[];r.got=0}
+  else if(t===3){const c=new Uint8Array(e.target.value.buffer.slice(e.target.value.byteOffset+1,e.target.value.byteOffset+v.byteLength));
+    r.chunks.push(c); r.got+=c.length; if(r.onprogress) r.onprogress(r.got,r.size)}
+  else if(t===4){pending=null; r.resolve(r)}
+  else if(t===5){pending=null; r.reject(new Error('camera error '+v.getUint8(1)))}
+}
+function request(cmd,id=0){
+  return new Promise((resolve,reject)=>{
+    pending={list:[],chunks:[],resolve,reject};
+    ctl.writeValueWithoutResponse(new Uint8Array([cmd,id&255,id>>8])).catch(reject);
+  });
+}
+async function fetchPhoto(id,label){
+  pending=null;
+  const p=request(2,id); pending.onprogress=(g,s)=>say(`${label}: ${g}/${s} bytes`);
+  const r=await p;
+  const blob=new Blob(r.chunks,{type:'image/jpeg'}), url=URL.createObjectURL(blob);
+  const d=document.createElement('div'); d.className='card';
+  d.innerHTML=`<img src="${url}"><a style="color:#ff7ab8" href="${url}" download="IMG_${String(id).padStart(4,'0')}.JPG">Save IMG_${id}</a>`;
+  $('grid').append(d);
+  if($('del').checked) await request(3,id);
+}
+async function refreshStatus(prefix=''){
+  const sv=await stat.readValue();
+  say(`${prefix}${sv.getUint8(0)} shots left on roll, ${sv.getUint16(1,true)} photos on camera.`);
+}
+$('newroll').onclick=async()=>{
+  if(!confirm('Load a new 27-shot roll? Photos already on the camera are kept.')) return;
+  try{ await request(5); await refreshStatus('New roll loaded. '); }catch(e){say('Error: '+e.message)}
+};
+$('connect').onclick=async()=>{
+  try{
+    const dev=await navigator.bluetooth.requestDevice({filters:[{services:[SVC]}]});
+    say('Connecting...');
+    const srv=await dev.gatt.connect(), svc=await srv.getPrimaryService(SVC);
+    ctl=await svc.getCharacteristic(CTL);
+    const data=await svc.getCharacteristic(DATA); data.addEventListener('characteristicvaluechanged',onData); await data.startNotifications();
+    stat=await svc.getCharacteristic(STAT);
+    await refreshStatus('Connected. ');
+    $('fetchall').disabled=false; $('newroll').disabled=false;
+    dev.addEventListener('gattserverdisconnected',()=>{say('Disconnected');$('fetchall').disabled=true;$('newroll').disabled=true});
+  }catch(e){say('Error: '+e.message)}
+};
+$('fetchall').onclick=async()=>{
+  try{
+    $('grid').innerHTML='';
+    const l=(await request(1)).list.sort((a,b)=>a.id-b.id);
+    for(let i=0;i<l.length;i++) await fetchPhoto(l[i].id,`Photo ${i+1}/${l.length}`);
+    say(`Done: ${l.length} photos.`);
+  }catch(e){say('Error: '+e.message)}
+};
+</script></body></html>
